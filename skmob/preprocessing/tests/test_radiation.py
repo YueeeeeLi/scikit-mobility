@@ -32,6 +32,7 @@ od = rd_fun.generate(
     tile_id_column="origin_node_idx",
     tot_outflows_column="tot_outflow",
     relevance_column="population",
+    list_of_destinations_column="list_of_destinations",
     out_format="flows",
 )
 print(od)

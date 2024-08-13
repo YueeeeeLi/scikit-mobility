@@ -19,7 +19,7 @@ class Radiation:
         probs = []
 
         # mi
-        origin_relevance = self.relevances[origin]
+        origin_relevance = self.pop_dict[origin]
         # Oi
         try:
             origin_outflow = self.tot_outflows[origin]
@@ -57,7 +57,7 @@ class Radiation:
 
             sum_inside = 0.0
             for destination, _ in destinations_and_weights:
-                destination_relevance = self.relevances[destination]
+                destination_relevance = self.pop_dict[destination]
                 prob_origin_destination = (
                     normalization_factor
                     * (origin_relevance * destination_relevance)
@@ -91,16 +91,16 @@ class Radiation:
         tile_id_column="origin_node_idx",
         tot_outflows_column="tot_outflow",
         relevance_column="population",
+        list_of_destinations_column="list_of_destinations",
         out_format="flows",
     ):
         self._network = network
         self.edge_weight_dict = {k: v["weight"] for k, v in enumerate(network.es)}
         self._out_format = out_format
         self._tile_id_column = tile_id_column
-        self.relevances = inputFile[relevance_column].fillna(0).values
-        self.pop_dict = inputFile.set_index("origin_node_idx")["population"]
-        self.destination_dict = inputFile.set_index("origin_node_idx")[
-            "list_of_destinations"
+        self.pop_dict = inputFile.set_index(tile_id_column)[relevance_column]
+        self.destination_dict = inputFile.set_index(tile_id_column)[
+            list_of_destinations_column
         ].to_dict()
 
         if "flows" in out_format:
@@ -117,9 +117,6 @@ class Radiation:
                 'Value of out_format "%s" is not valid. \nValid values: flows, flows_sample, probabilities.'
                 % out_format
             )
-
-        # compute the total relevance, i.e., the sum of relevances of all the locations
-        # total_relevance = np.sum(self.relevances)
 
         all_flows = []
         for origin in tqdm(range(len(inputFile))):  # tqdm print a progress bar
