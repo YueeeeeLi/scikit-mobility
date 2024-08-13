@@ -98,6 +98,7 @@ class Radiation:
         self._out_format = out_format
         self._tile_id_column = tile_id_column
         self.relevances = inputFile[relevance_column].fillna(0).values
+        self.pop_dict = inputFile.set_index("origin_node_idx")["population"]
         self.destination_dict = inputFile.set_index("origin_node_idx")[
             "list_of_destinations"
         ].to_dict()
@@ -118,11 +119,16 @@ class Radiation:
             )
 
         # compute the total relevance, i.e., the sum of relevances of all the locations
-        total_relevance = np.sum(self.relevances)
+        # total_relevance = np.sum(self.relevances)
 
         all_flows = []
         for origin in tqdm(range(len(inputFile))):  # tqdm print a progress bar
-
+            # calculate relevance
+            origin_relevance = self.pop_dict[origin]
+            destination_relevance = sum(
+                [self.pop_dict[i] for i in self.destination_dict[0]]
+            )
+            total_relevance = origin_relevance + destination_relevance
             # get the edges for the current origin location
             flows_from_origin = self._get_flows(origin, total_relevance)
 
