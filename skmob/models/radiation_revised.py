@@ -13,7 +13,7 @@ class Radiation:
     def _get_flows(
         self,
         origin,
-        total_relevance,
+        weight_col,
     ):
         edges = []
         probs = []
@@ -26,13 +26,13 @@ class Radiation:
         except AttributeError:
             origin_outflow = 1
 
-        if origin_outflow > 0.0:
+        if origin_outflow > 0.0:  # only for origins with positive outflows
             # find the shortest paths
             list_of_destinations = self.destination_dict[origin]
             shortest_paths = self._network.get_shortest_paths(
                 v=origin,
                 to=list_of_destinations,
-                weights="weight",
+                weights=weight_col,  # weight columns in df
                 mode="out",
                 output="epath",
             )
@@ -41,15 +41,28 @@ class Radiation:
                 [(origin, list_of_destinations, shortest_paths)],
                 columns=["origin", "destination", "path"],
             ).explode(["destination", "path"])
+            # temp_flow_matrix = temp_flow_matrix[
+            #     temp_flow_matrix.path.apply(lambda x: len(x) > 0)
+            # ].reset_index(drop=True)
+
+            destination_relevance = (
+                temp_flow_matrix["destination"].apply(lambda x: self.pop_dict.get(x, 0))
+            ).sum()
+
+            total_relevance = origin_relevance + destination_relevance
+            normalization_factor = 1.0 / (1.0 - origin_relevance / total_relevance)
 
             # compute the normalization factor
-            normalization_factor = 1.0 / (1.0 - origin_relevance / total_relevance)
             destinations_and_weights = []
             for _, row in temp_flow_matrix.iterrows():
                 destination = row["destination"]
                 weight = 0
-                for edge in row["path"]:
-                    weight += self.edge_weight_dict[edge]
+
+                if len(row["path"]) == 0:  # if no path is found
+                    weight = 1e20  # assign a very large weight if no path is found
+                else:
+                    for edge in row["path"]:
+                        weight += self.edge_weight_dict[edge]
                 destinations_and_weights += [(destination, weight)]
 
             # sort the destinations by distance (from the closest to the farthest)
@@ -57,7 +70,7 @@ class Radiation:
 
             sum_inside = 0.0
             for destination, _ in destinations_and_weights:
-                destination_relevance = self.pop_dict[destination]
+                destination_relevance = self.pop_dict.get(destination, 0)
                 prob_origin_destination = (
                     normalization_factor
                     * (origin_relevance * destination_relevance)
@@ -88,6 +101,7 @@ class Radiation:
         self,
         network,
         inputFile,
+        weight_col,
         tile_id_column="origin_node_idx",
         tot_outflows_column="tot_outflow",
         relevance_column="population",
@@ -95,7 +109,7 @@ class Radiation:
         out_format="flows",
     ):
         self._network = network
-        self.edge_weight_dict = {k: v["weight"] for k, v in enumerate(network.es)}
+        self.edge_weight_dict = {k: v[weight_col] for k, v in enumerate(network.es)}
         self._out_format = out_format
         self._tile_id_column = tile_id_column
         self.pop_dict = inputFile.set_index(tile_id_column)[relevance_column]
@@ -109,7 +123,9 @@ class Radiation:
                     "The column %s for the 'tot_outflows' must be present in the tessellation."
                     % tot_outflows_column
                 )
-            self.tot_outflows = inputFile[tot_outflows_column].fillna(0).values
+            self.tot_outflows = inputFile.set_index(tile_id_column)[
+                tot_outflows_column
+            ].to_dict()
 
         # check if arguments are valid
         if out_format not in ["flows", "flows_sample", "probabilities"]:
@@ -121,17 +137,11 @@ class Radiation:
         all_flows = []
         for origin in tqdm(range(len(inputFile))):  # tqdm print a progress bar
             # calculate relevance
-            origin_relevance = self.pop_dict[origin]
-            destination_relevance = sum(
-                [self.pop_dict[i] for i in self.destination_dict[0]]
-            )
-            total_relevance = origin_relevance + destination_relevance
+            origin = inputFile.loc[origin, tile_id_column]
             # get the edges for the current origin location
-            flows_from_origin = self._get_flows(origin, total_relevance)
-
+            flows_from_origin = self._get_flows(origin, weight_col)
             if len(flows_from_origin) > 0:
                 all_flows += list(flows_from_origin)
-
         # Always return a FlowDataFrame
         if True:  # 'flows' in out_format:
             return self._from_matrix_to_flowdf(all_flows, inputFile)
@@ -139,16 +149,6 @@ class Radiation:
             return all_flows
 
     def _from_matrix_to_flowdf(self, all_flows, inputFile):
-        index2tileid = dict(
-            [
-                (i, tileid)
-                for i, tileid in enumerate(inputFile[self._tile_id_column].values)
-            ]
-        )
-        output_list = [
-            [index2tileid[i], index2tileid[j], flow]
-            for i, j, flow in all_flows
-            if flow > 0.0
-        ]
+        output_list = [[i, j, flow] for i, j, flow in all_flows if flow > 0.0]
         temp_df = pd.DataFrame(output_list, columns=["origin", "destination", "flows"])
         return temp_df
